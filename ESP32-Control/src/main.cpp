@@ -1,9 +1,15 @@
 #include <Arduino.h>
 #include <ESP32-TWAI-CAN.hpp> // Include the CAN library
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <ArduinoJson.h>
 
 // Define CAN interface pins (use your specific ESP32 pins)
 #define CAN_TX 5
 #define CAN_RX 4
+
+const char *ssid = "ssid";
+const char *password = "password";
 
 #define FRAME_DATETIME 0x4040001
 #define FRAME_CURRENT_TEMP 0x4040001
@@ -20,249 +26,303 @@
 #define FRAME_MODE 0x140C0014
 #define FRAME_POWER 0x140C0013
 
-enum sendStepEnum
-{
-    Zone0Closed,
-    Zone0Open,
-    Zone1Closed,
-    Zone1Open,
-    Zone2Closed,
-    Zone2Open,
-    Zone3Closed,
-    Zone3Open,
-    Zone4Closed,
-    Zone4Open,
-    Zone5Closed,
-    Zone5Open,
-    Temp20,
-    Temp21,
-    Temp22,
-    Temp23,
-    Temp24,
-    Temp25,
-    Temp26,
-    Temp27,
-    Temp28,
-    Temp29,
-    TempReset,
-    FanHigh,
-    FanMedium,
-    FanLow,
-    ModeHeat,
-    ModeVent,
-    ModeDry,
-    ModeAuto,
-    ModeCool
-};
+AsyncWebServer server(80);
 
-static uint32_t delayTime = 5000;
-static unsigned long lastSent = 0;
-static sendStepEnum sendStep = Zone0Closed;
+static float acCurrentTemp = 24.0;
+static bool acZone0 = true;
+static bool acZone1 = true;
+static bool acZone2 = true;
+static bool acZone3 = true;
+static bool acZone4 = true;
+static bool acZone5 = true;
+static int acSetTemp = 24;
+static uint8_t acFanSpeed = 1;
+static uint8_t acMode = 1;
+static bool acPower = false;
+
+static CanFrame outgoingFrame;
 
 void displayFrame(CanFrame &frame, bool sending)
 {
     if (sending)
     {
         Serial.print("Sending ");
-
-        Serial.print("Frame ID: 0x");
-        Serial.print(frame.identifier, HEX);
-
-        Serial.print(" extd: ");
-        Serial.print(frame.extd, HEX);
-
-        Serial.print(" flags: ");
-        Serial.print(frame.flags, HEX);
-
-        Serial.print(" rtr: ");
-        Serial.print(frame.rtr, HEX);
-
-        Serial.print(" self: ");
-        Serial.print(frame.self, HEX);
-
-        Serial.print(" Data: ");
-        for (int i = 0; i < frame.data_length_code; i++)
-        {
-            Serial.print(frame.data[i], HEX);
-            Serial.print(" ");
-        }
-        Serial.println();
     }
     else
     {
-        if (frame.identifier == FRAME_DATETIME)
-        {
-            // Date/Time
-            Serial.print("Date/Time 20");
-            Serial.print(frame.data[4]); // yyyy
-            Serial.print("/");
-            Serial.print(frame.data[5]); // mmm
-            Serial.print("/");
-            Serial.print(frame.data[6]); // dd
+        Serial.print("Received ");
+    }
 
-            Serial.print(" ");
+    Serial.print("ID: 0x");
+    Serial.print(frame.identifier, HEX);
 
-            Serial.print(frame.data[0]); // HH
-            Serial.print(":");
-            Serial.print(frame.data[1]); // mm
-            Serial.print(":");
-            Serial.println(frame.data[2]); // ss
-        }
+    Serial.print(" extd: ");
+    Serial.print(frame.extd, HEX);
 
-        if (frame.identifier == FRAME_CURRENT_TEMP)
-        {
-            // Current temperature
-            uint16_t binTemp = (frame.data[5] << 8) + frame.data[4];
-            Serial.print("Hex Temp ");
-            Serial.print(binTemp, HEX);
-            Serial.print(" (");
-            Serial.print(binTemp);
-            Serial.print(") ");
+    Serial.print(" flags: ");
+    Serial.print(frame.flags, HEX);
 
-            float temperature = (float)binTemp / 100.0;
-            Serial.print("Current Temperature ");
-            Serial.print(temperature);
-            Serial.print(" (");
-            Serial.print(temperature, 1);
-            Serial.println(")");
-        }
+    Serial.print(" rtr: ");
+    Serial.print(frame.rtr, HEX);
+
+    Serial.print(" self: ");
+    Serial.print(frame.self, HEX);
+
+    Serial.print(" Data: ");
+    for (int i = 0; i < frame.data_length_code; i++)
+    {
+        Serial.print(frame.data[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();
+}
+
+void processReceivedFrame(CanFrame &frame)
+{
+    bool printFrameData = false;
+
+    if (frame.identifier == FRAME_DATETIME)
+    {
+        Serial.print("Date/Time 20");
+        Serial.print(frame.data[4]); // yyyy
+        Serial.print("/");
+        Serial.print(frame.data[5]); // mmm
+        Serial.print("/");
+        Serial.print(frame.data[6]); // dd
+
+        Serial.print(" ");
+
+        Serial.print(frame.data[0]); // HH
+        Serial.print(":");
+        Serial.print(frame.data[1]); // mm
+        Serial.print(":");
+        Serial.println(frame.data[2]); // ss
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_CURRENT_TEMP)
+    {
+        uint16_t binTemp = (frame.data[5] << 8) + frame.data[4];
+        acCurrentTemp = (float)binTemp / 100.0;
+        Serial.print("Current Temperature ");
+        Serial.print(acCurrentTemp, 1);
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_ZONE0)
+    {
+        acZone0 = frame.data[0] == 1;
+        Serial.print("Zone 0 ");
+        Serial.println(acZone0);
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_ZONE1)
+    {
+        acZone1 = frame.data[0] == 1;
+        Serial.print("Zone 1 ");
+        Serial.println(acZone1);
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_ZONE2)
+    {
+        acZone2 = frame.data[0] == 1;
+        Serial.print("Zone 2 ");
+        Serial.println(acZone2);
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_ZONE3)
+    {
+        acZone3 = frame.data[0] == 1;
+        Serial.print("Zone 3 ");
+        Serial.println(acZone3);
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_ZONE4)
+    {
+        acZone4 = frame.data[0] == 1;
+        Serial.print("Zone 4 ");
+        Serial.println(acZone4);
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_ZONE5)
+    {
+        acZone5 = frame.data[0] == 1;
+        Serial.print("Zone 5 ");
+        Serial.println(acZone5);
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_SET_TEMP)
+    {
+        acSetTemp = ((frame.data[1] << 8) + frame.data[0]) / 100;
+        Serial.print("Set Temperature ");
+        Serial.println(acSetTemp);
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_FAN_SPEED)
+    {
+        acFanSpeed = frame.data[0];
+        Serial.print("Fan Speed ");
+        Serial.println(acFanSpeed);
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_MODE)
+    {
+        acMode = frame.data[0];
+        Serial.print("Mode ");
+        Serial.println(acMode);
+        printFrameData = true;
+    }
+
+    else if (frame.identifier == FRAME_POWER)
+    {
+        acPower = frame.data[0] == 1;
+        Serial.print("Power ");
+        Serial.println(acPower);
+        printFrameData = true;
+    }
+
+    if (printFrameData)
+    {
+        displayFrame(frame, false);
     }
 }
 
-void sendFrame(CanFrame &frame)
+void sendFrame()
 {
-    displayFrame(frame, true);
-    if (ESP32Can.writeFrame(frame))
+    if (ESP32Can.writeFrame(outgoingFrame, 200))
     {
+        displayFrame(outgoingFrame, true);
         Serial.println("CAN frame sent!");
     }
     else
     {
         Serial.println("Failed to send CAN frame.");
+        twai_status_info_t status_info;
+        twai_get_status_info(&status_info);
+        Serial.println(status_info.state); // TWAI_STATE_STOPPED, TWAI_STATE_RUNNING, TWAI_STATE_BUS_OFF
+        Serial.println(status_info.tx_error_counter);
+        Serial.println(status_info.rx_error_counter);
     }
 }
 
-void setZone(CanFrame &frame, uint8_t zone, bool zoneOpen)
+void setZone(uint8_t zone)
 {
     switch (zone)
     {
     case 0:
-        frame.identifier = FRAME_ZONE0;
+        outgoingFrame.identifier = FRAME_ZONE0;
+        outgoingFrame.data[0] = acZone0 ? 1 : 2;
         break;
 
     case 1:
-        frame.identifier = FRAME_ZONE1;
+        outgoingFrame.identifier = FRAME_ZONE1;
+        outgoingFrame.data[0] = acZone1 ? 1 : 2;
         break;
 
     case 2:
-        frame.identifier = FRAME_ZONE2;
+        outgoingFrame.identifier = FRAME_ZONE2;
+        outgoingFrame.data[0] = acZone2 ? 1 : 2;
         break;
 
     case 3:
-        frame.identifier = FRAME_ZONE3;
+        outgoingFrame.identifier = FRAME_ZONE3;
+        outgoingFrame.data[0] = acZone3 ? 1 : 2;
         break;
 
     case 4:
-        frame.identifier = FRAME_ZONE4;
+        outgoingFrame.identifier = FRAME_ZONE4;
+        outgoingFrame.data[0] = acZone4 ? 1 : 2;
         break;
 
     case 5:
-        frame.identifier = FRAME_ZONE5;
+        outgoingFrame.identifier = FRAME_ZONE5;
+        outgoingFrame.data[0] = acZone5 ? 1 : 2;
         break;
 
     default:
-        frame.identifier = 0; // Should never get here
+        outgoingFrame.identifier = 0; // Should never get here
+        return;
     }
 
-    if (zoneOpen)
-    {
-        frame.data[0] = 1;
-    }
-    else
-    {
-        frame.data[0] = 2;
-    }
+    outgoingFrame.data[1] = 9;
+    outgoingFrame.data[2] = 0;
+    outgoingFrame.data[3] = 0;
+    outgoingFrame.data[4] = 0;
+    outgoingFrame.data[5] = 0;
+    outgoingFrame.data[6] = 0;
+    outgoingFrame.data[7] = 0;
 
-    frame.data[1] = 9;
-    frame.data[2] = 0;
-    frame.data[3] = 0;
-    frame.data[4] = 0;
-    frame.data[5] = 0;
-    frame.data[6] = 0;
-    frame.data[7] = 0;
+    Serial.print("Setting Zone ");
 
-    Serial.print("Zone ");
-    Serial.print(zone);
-    if (zoneOpen)
-    {
-        Serial.println(" Open");
-    }
-    else
-    {
-        Serial.println(" Closed");
-    }
-
-    sendFrame(frame);
+    sendFrame();
 }
 
-void setTemperature(CanFrame &frame, uint8_t temperature)
+void setTemperature()
 {
-    if (temperature < 15)
+    if (acSetTemp < 15)
     {
-        temperature = 15;
+        acSetTemp = 15;
     }
 
-    if (temperature > 30)
+    if (acSetTemp > 30)
     {
-        temperature = 30;
+        acSetTemp = 30;
     }
 
-    int longTemp = temperature * 100;
+    int longTemp = acSetTemp * 100;
     uint8_t binTempL = longTemp & 0xFF;
     uint8_t binTempH = (longTemp >> 8) & 0xFF;
 
-    frame.identifier = FRAME_SET_TEMP; // Set temperature
+    outgoingFrame.identifier = FRAME_SET_TEMP; // Set temperature
 
-    frame.data[0] = binTempL;
-    frame.data[1] = binTempH;
-    frame.data[2] = 0;
-    frame.data[3] = 0;
-    frame.data[4] = 0;
-    frame.data[5] = 0;
-    frame.data[6] = 0;
-    frame.data[7] = 0;
+    outgoingFrame.data[0] = binTempL;
+    outgoingFrame.data[1] = binTempH;
+    outgoingFrame.data[2] = 0;
+    outgoingFrame.data[3] = 0;
+    outgoingFrame.data[4] = 0;
+    outgoingFrame.data[5] = 0;
+    outgoingFrame.data[6] = 0;
+    outgoingFrame.data[7] = 0;
 
     Serial.print("Set temperature ");
-    Serial.println(temperature);
+    Serial.println(acSetTemp);
 
-    sendFrame(frame);
+    sendFrame();
 }
 
-void setFanSpeed(CanFrame &frame, uint8_t speed)
+void setFanSpeed()
 {
-    if (speed < 1)
+    if (acFanSpeed < 1)
     {
-        speed = 1;
+        acFanSpeed = 1;
     }
 
-    if (speed > 3)
+    if (acFanSpeed > 3)
     {
-        speed = 3;
+        acFanSpeed = 3;
     }
 
-    frame.identifier = FRAME_FAN_SPEED; // Set fan speed
+    outgoingFrame.identifier = FRAME_FAN_SPEED; // Set fan speed
 
-    frame.data[0] = speed;
-    frame.data[1] = 9;
-    frame.data[2] = 0;
-    frame.data[3] = 0;
-    frame.data[4] = 0;
-    frame.data[5] = 0;
-    frame.data[6] = 0;
-    frame.data[7] = 0;
+    outgoingFrame.data[0] = acFanSpeed;
+    outgoingFrame.data[1] = 9;
+    outgoingFrame.data[2] = 0;
+    outgoingFrame.data[3] = 0;
+    outgoingFrame.data[4] = 0;
+    outgoingFrame.data[5] = 0;
+    outgoingFrame.data[6] = 0;
+    outgoingFrame.data[7] = 0;
 
     Serial.print("Fan speed ");
-    switch (speed)
+    switch (acFanSpeed)
     {
     case 1:
         Serial.println("Low");
@@ -280,34 +340,34 @@ void setFanSpeed(CanFrame &frame, uint8_t speed)
         break;
     }
 
-    sendFrame(frame);
+    sendFrame();
 }
 
-void setMode(CanFrame &frame, uint8_t mode)
+void setMode()
 {
-    if (mode < 1)
+    if (acMode < 1)
     {
-        mode = 1;
+        acMode = 1;
     }
 
-    if (mode > 5)
+    if (acMode > 5)
     {
-        mode = 5;
+        acMode = 5;
     }
 
-    frame.identifier = FRAME_MODE; // Set mode
+    outgoingFrame.identifier = FRAME_MODE; // Set mode
 
-    frame.data[0] = mode;
-    frame.data[1] = 9;
-    frame.data[2] = 0;
-    frame.data[3] = 0;
-    frame.data[4] = 0;
-    frame.data[5] = 0;
-    frame.data[6] = 0;
-    frame.data[7] = 0;
+    outgoingFrame.data[0] = acMode;
+    outgoingFrame.data[1] = 9;
+    outgoingFrame.data[2] = 0;
+    outgoingFrame.data[3] = 0;
+    outgoingFrame.data[4] = 0;
+    outgoingFrame.data[5] = 0;
+    outgoingFrame.data[6] = 0;
+    outgoingFrame.data[7] = 0;
 
     Serial.print("Mode ");
-    switch (mode)
+    switch (acMode)
     {
     case 1:
         Serial.println("Cool");
@@ -333,238 +393,176 @@ void setMode(CanFrame &frame, uint8_t mode)
         break;
     }
 
-    sendFrame(frame);
+    sendFrame();
 }
 
-void setPower(CanFrame &frame, bool powerOn)
+void setPower()
 {
-    frame.identifier = FRAME_POWER; // Set power on/off
+    outgoingFrame.extd = 1;
+    outgoingFrame.flags = 1;
+    outgoingFrame.data_length_code = 8;
 
-    if (powerOn)
-    {
-        frame.data[0] = 1;
-    }
-    else
-    {
-        frame.data[0] = 0;
-    }
+    outgoingFrame.identifier = FRAME_POWER; // Set power on/off
 
-    frame.data[1] = 9;
-    frame.data[2] = 0;
-    frame.data[3] = 0;
-    frame.data[4] = 0;
-    frame.data[5] = 0;
-    frame.data[6] = 0;
-    frame.data[7] = 0;
+    outgoingFrame.data[0] = acPower ? 1 : 0;
+    outgoingFrame.data[1] = 9;
+    outgoingFrame.data[2] = 0;
+    outgoingFrame.data[3] = 0;
+    outgoingFrame.data[4] = 0;
+    outgoingFrame.data[5] = 0;
+    outgoingFrame.data[6] = 0;
+    outgoingFrame.data[7] = 0;
 
     Serial.print("Power ");
-    if (powerOn)
-    {
-        Serial.println("On");
-    }
-    else
-    {
-        Serial.println("Off");
-    }
+    acPower ? Serial.println("On") : Serial.println("Off");
+
+    sendFrame();
 }
 
 void setup()
 {
     Serial.begin(115200);
     delay(1000);
+
+    // Connect to Wi-Fi
+    WiFi.begin(ssid, password);
+    Serial.print("Connecting to WiFi...");
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println();
+    Serial.println("Connected to WiFi");
+    Serial.println(WiFi.localIP());
+
+    server.on("/api", HTTP_GET, [](AsyncWebServerRequest *request)
+    {
+        Serial.println("GET");
+        JsonDocument doc;
+        doc["onOff"] = acPower;
+        doc["mode"] = acMode;
+        doc["fanSpeed"] = acFanSpeed;
+        doc["currentTemp"] = acCurrentTemp;
+        doc["setTemp"] = acSetTemp;
+        doc["zone0"] = acZone0;
+        doc["zone1"] = acZone1;
+        doc["zone2"] = acZone2;
+        doc["zone3"] = acZone3;
+        doc["zone4"] = acZone4;
+        doc["zone5"] = acZone5;
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
+    });
+
+    server.on("/api", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+    {
+        Serial.println("POST");
+        JsonDocument doc;
+        DeserializationError error = deserializeJson(doc, data);
+        if (error)
+        {
+            request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+            return;
+        }
+
+        bool rxPower = doc["onOff"];
+        uint8_t rxMode = doc["mode"];
+        uint8_t rxFanSpeed = doc["fanSpeed"];
+        int rxSetTemp = doc["setTemp"];
+        bool rxZone0 = doc["zone0"];
+        bool rxZone1 = doc["zone1"];
+        bool rxZone2 = doc["zone2"];
+        bool rxZone3 = doc["zone3"];
+        bool rxZone4 = doc["zone4"];
+        bool rxZone5 = doc["zone5"];
+
+        request->send(200, "application/json");
+
+        if (rxPower != acPower)
+        {
+            acPower = rxPower;
+            setPower();
+        }
+
+        if (rxMode != acMode)
+        {
+            acMode = rxMode;
+            setMode();
+        }
+
+        if (rxFanSpeed != acFanSpeed)
+        {
+            acFanSpeed = rxFanSpeed;
+            setFanSpeed();
+        }
+
+        if (rxSetTemp != acSetTemp)
+        {
+            acSetTemp = rxSetTemp;
+            setTemperature();
+        }
+
+        if (rxZone0 != acZone0)
+        {
+            acZone0 = rxZone0;
+            setZone(0);
+        }
+
+        if (rxZone1 != acZone1)
+        {
+            acZone1 = rxZone1;
+            setZone(1);
+        }
+
+        if (rxZone2 != acZone2)
+        {
+            acZone2 = rxZone2;
+            setZone(2);
+        }
+
+        if (rxZone3 != acZone3)
+        {
+            acZone3 = rxZone3;
+            setZone(3);
+        }
+
+        if (rxZone4 != acZone4)
+        {
+            acZone4 = rxZone4;
+            setZone(4);
+        }
+
+        if (rxZone5 != acZone5)
+        {
+            acZone5 = rxZone5;
+            setZone(5);
+        }
+    });
+
+    server.begin();
+
     Serial.println("Initializing CAN...");
 
     // Set up CAN configuration
     ESP32Can.setPins(CAN_TX, CAN_RX);      // Set TX and RX pins
     ESP32Can.setSpeed(TWAI_SPEED_125KBPS); // Set CAN speed to 500 Kbps
-
-    // // Optional: set filter (accept all)
-    // twai_filter_config_t filter = TWAI_FILTER_CONFIG_ACCEPT_ALL();
-    // ESP32Can.setFilter(&filter);
-
-    ESP32Can.begin(); // Initialize CAN interface
+    ESP32Can.begin();                      // Initialize CAN interface
 
     Serial.println("CAN Initialized");
+
+    outgoingFrame.extd = 1;
+    outgoingFrame.flags = 1;
+    outgoingFrame.data_length_code = 8;
 }
 
 void loop()
 {
-
-    if (millis() - lastSent > delayTime)
-    {
-        lastSent = millis();
-
-        CanFrame outgoingFrame;
-        outgoingFrame.extd = 1;
-        outgoingFrame.flags = 1;
-        outgoingFrame.data_length_code = 8;
-
-        switch (sendStep)
-        {
-        case Zone0Closed:
-            setZone(outgoingFrame, 0, false);
-            sendStep = Zone0Open;
-            break;
-
-        case Zone0Open:
-            setZone(outgoingFrame, 0, true);
-            sendStep = Zone1Closed;
-            break;
-
-        case Zone1Closed:
-            setZone(outgoingFrame, 1, false);
-            sendStep = Zone1Open;
-            break;
-
-        case Zone1Open:
-            setZone(outgoingFrame, 1, true);
-            sendStep = Zone2Closed;
-            break;
-
-        case Zone2Closed:
-            setZone(outgoingFrame, 2, false);
-            sendStep = Zone2Open;
-            break;
-
-        case Zone2Open:
-            setZone(outgoingFrame, 2, true);
-            sendStep = Zone3Closed;
-            break;
-
-        case Zone3Closed:
-            setZone(outgoingFrame, 3, false);
-            sendStep = Zone3Open;
-            break;
-
-        case Zone3Open:
-            setZone(outgoingFrame, 3, true);
-            sendStep = Zone4Closed;
-            break;
-
-        case Zone4Closed:
-            setZone(outgoingFrame, 4, false);
-            sendStep = Zone4Open;
-            break;
-
-        case Zone4Open:
-            setZone(outgoingFrame, 4, true);
-            sendStep = Zone5Closed;
-            break;
-
-        case Zone5Closed:
-            setZone(outgoingFrame, 5, false);
-            sendStep = Zone5Open;
-            break;
-
-        case Zone5Open:
-            setZone(outgoingFrame, 5, true);
-            sendStep = Temp20;
-            break;
-
-        case Temp20:
-            setTemperature(outgoingFrame, 20);
-            sendStep = Temp21;
-            break;
-
-        case Temp21:
-            setTemperature(outgoingFrame, 21);
-            sendStep = Temp22;
-            break;
-
-        case Temp22:
-            setTemperature(outgoingFrame, 22);
-            sendStep = Temp23;
-            break;
-
-        case Temp23:
-            setTemperature(outgoingFrame, 23);
-            sendStep = Temp24;
-            break;
-
-        case Temp24:
-            setTemperature(outgoingFrame, 24);
-            sendStep = Temp25;
-            break;
-
-        case Temp25:
-            setTemperature(outgoingFrame, 25);
-            sendStep = Temp26;
-            break;
-
-        case Temp26:
-            setTemperature(outgoingFrame, 26);
-            sendStep = Temp27;
-            break;
-
-        case Temp27:
-            setTemperature(outgoingFrame, 27);
-            sendStep = Temp28;
-            break;
-
-        case Temp28:
-            setTemperature(outgoingFrame, 28);
-            sendStep = Temp29;
-            break;
-
-        case Temp29:
-            setTemperature(outgoingFrame, 29);
-            sendStep = TempReset;
-            break;
-
-        case TempReset:
-            setTemperature(outgoingFrame, 24);
-            sendStep = FanHigh;
-            break;
-
-        case FanHigh:
-            setFanSpeed(outgoingFrame, 3);
-            sendStep = FanMedium;
-            break;
-
-        case FanMedium:
-            setFanSpeed(outgoingFrame, 2);
-            sendStep = FanLow;
-            break;
-
-        case FanLow:
-            setFanSpeed(outgoingFrame, 1);
-            sendStep = ModeHeat;
-            break;
-
-        case ModeHeat:
-            setMode(outgoingFrame, 2);
-            sendStep = ModeVent;
-            break;
-
-        case ModeVent:
-            setMode(outgoingFrame, 3);
-            sendStep = ModeDry;
-            break;
-
-        case ModeDry:
-            setMode(outgoingFrame, 4);
-            sendStep = ModeAuto;
-            break;
-
-        case ModeAuto:
-            setMode(outgoingFrame, 5);
-            sendStep = ModeCool;
-            break;
-
-        case ModeCool:
-            setMode(outgoingFrame, 1);
-            sendStep = Zone0Closed;
-            break;
-
-        default:
-            Serial.println("SendStep invalid");
-        }
-    }
-
     // Check if a CAN frame is received
     CanFrame incoming;
     if (ESP32Can.readFrame(incoming))
     {
-        displayFrame(incoming, false);
+        processReceivedFrame(incoming);
     }
 }
