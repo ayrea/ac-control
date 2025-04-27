@@ -5,56 +5,64 @@ import { ReactElement, useState } from 'react';
 import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import ArrowDropUpIcon from '@mui/icons-material/ArrowDropUp';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
-import { getEnumKeys } from '../helperFunctions';
+import { getEnumKeys, getEnumValues } from '../helperFunctions';
 import AcUnitIcon from '@mui/icons-material/AcUnit';
 import SunnyIcon from '@mui/icons-material/Sunny';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
 import BeachAccessIcon from '@mui/icons-material/BeachAccess';
 import AutoModeIcon from '@mui/icons-material/AutoMode';
 
-interface AcMode {
+interface AcModeItem {
     index: number;
     icon: ReactElement;
     label: string
 }
 
-const acModes: AcMode[] = [
+const acModes: AcModeItem[] = [
     {
-        index: 0,
+        index: 1,
         label: "Cool",
         icon: <AcUnitIcon sx={{ mt: 1, color: "blue" }} />
     },
     {
-        index: 1,
+        index: 2,
         label: "Heat",
         icon: <SunnyIcon sx={{ mt: 1, color: "red" }} />
     },
     {
-        index: 2,
+        index: 3,
         label: "Vent",
         icon: <CloudQueueIcon sx={{ mt: 1, color: "black" }} />
     },
     {
-        index: 3,
+        index: 4,
         label: "Dry",
         icon: <BeachAccessIcon sx={{ mt: 1, color: "#adad00" }} />
     },
     {
-        index: 4,
+        index: 5,
         label: "Auto",
         icon: <AutoModeIcon sx={{ mt: 1, color: "black" }} />
     }
 ];
 
+enum AcModeEnum {
+    Cool = 1,
+    Heat = 2,
+    Vent = 3,
+    Dry = 4,
+    Auto = 5
+}
+
 enum FanSpeedEnum {
-    Low,
-    Medium,
-    High
+    Low = 1,
+    Medium = 2,
+    High = 3
 }
 
 interface AcState {
     onOff: boolean,
-    mode: AcMode,
+    mode: AcModeEnum,
     fanSpeed: FanSpeedEnum,
     currentTemp: number,
     setTemp: number
@@ -70,7 +78,7 @@ interface AcZone {
 const acInitialState = (): AcState => {
     return {
         onOff: false,
-        mode: acModes[0],
+        mode: AcModeEnum.Cool,
         fanSpeed: FanSpeedEnum.Low,
         currentTemp: 24.3,
         setTemp: 25,
@@ -110,7 +118,7 @@ const acInitialState = (): AcState => {
 }
 
 export default function AcControl() {
-    const [acState, setAcState] = useState<AcState>(acInitialState);
+    const [acState, setAcState] = useState<AcState>(acInitialState());
 
     const togglePower = () => {
         setAcState({ ...acState, onOff: !acState.onOff })
@@ -135,8 +143,7 @@ export default function AcControl() {
     }
 
     const handleChangeMode = (e: SelectChangeEvent) => {
-        const selectedMode: AcMode = acModes.find((mode) => mode.index.toString() === e.target.value.toString()) ?? acModes[0];
-        setAcState({ ...acState, mode: { ...selectedMode } });
+        setAcState({ ...acState, mode: Number.parseInt(e.target.value) });
     }
 
     const handleChangeFanSpeed = (e: SelectChangeEvent) => {
@@ -152,6 +159,8 @@ export default function AcControl() {
         newZones[index].isOpen = isOpen;
         setAcState({ ...acState, zones: newZones });
     }
+
+    const fanSpeedValues = getEnumValues(FanSpeedEnum);
 
     return (
         <Paper elevation={6} sx={{ maxWidth: "560px" }}>
@@ -194,7 +203,7 @@ export default function AcControl() {
                 </Grid>
                 <Grid size={8} justifyItems={'left'} sx={{ mb: 1 }}>
                     <Box m={1} mt={1.5} display={"flex"}>
-                        <Select sx={{ width: "230px", height: '46px' }} value={acState.mode.index.toString()} onChange={handleChangeMode}>
+                        <Select sx={{ width: "230px", height: '46px' }} value={acState.mode.toString()} onChange={handleChangeMode}>
                             {acModes.map((mode) => {
                                 return (
                                     <MenuItem key={mode.label} value={mode.index}>
@@ -216,7 +225,7 @@ export default function AcControl() {
                     <Box m={1} mt={1.5} display={"flex"}>
                         <Select sx={{ width: "230px", height: '46px' }} value={acState.fanSpeed.toString()} onChange={handleChangeFanSpeed}>
                             {getEnumKeys(FanSpeedEnum).map((fanSpeed: string, index: number) => {
-                                return (<MenuItem key={index} value={index}>
+                                return (<MenuItem key={fanSpeedValues[index]} value={fanSpeedValues[index]}>
                                     <Typography variant='h4'>{fanSpeed}</Typography>
                                 </MenuItem>);
                             })}
