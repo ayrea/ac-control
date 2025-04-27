@@ -18,6 +18,7 @@
 #define FRAME_SET_TEMP 0x140C0017
 #define FRAME_FAN_SPEED 0x140C0015
 #define FRAME_MODE 0x140C0014
+#define FRAME_POWER 0x140C0013
 
 enum sendStepEnum
 {
@@ -333,6 +334,38 @@ void setMode(CanFrame &frame, uint8_t mode)
     }
 
     sendFrame(frame);
+}
+
+void setPower(CanFrame &frame, bool powerOn)
+{
+    frame.identifier = FRAME_POWER; // Set power on/off
+
+    if (powerOn)
+    {
+        frame.data[0] = 1;
+    }
+    else
+    {
+        frame.data[0] = 0;
+    }
+
+    frame.data[1] = 9;
+    frame.data[2] = 0;
+    frame.data[3] = 0;
+    frame.data[4] = 0;
+    frame.data[5] = 0;
+    frame.data[6] = 0;
+    frame.data[7] = 0;
+
+    Serial.print("Power ");
+    if (powerOn)
+    {
+        Serial.println("On");
+    }
+    else
+    {
+        Serial.println("Off");
+    }
 }
 
 void setup()
