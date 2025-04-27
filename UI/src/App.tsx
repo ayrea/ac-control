@@ -1,6 +1,8 @@
 import { ThemeProvider } from '@emotion/react';
 import AcControl from './components/AcControl';
 import { createTheme } from '@mui/material';
+import ApiUrlPrompt from './components/ApiUrlPrompt';
+import { useState } from 'react';
 
 const theme = createTheme({
   palette: {
@@ -11,10 +13,12 @@ const theme = createTheme({
 });
 
 function App() {
+  const [baseApiUrl, setBaseApiUrl] = useState<string | null>(localStorage.getItem('baseApiUrl'));
+
   return (
-    <ThemeProvider theme={theme} >
-      <AcControl />
-    </ThemeProvider>
+    baseApiUrl
+      ? (<ThemeProvider theme={theme}>< AcControl /></ThemeProvider >)
+      : <ApiUrlPrompt setBaseUrl={setBaseApiUrl} />
   )
 }
 
