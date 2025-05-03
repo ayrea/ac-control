@@ -54,7 +54,7 @@ enum sendStepEnum
     ModeCool
 };
 
-static uint32_t delayTime = 5000;
+static uint32_t delayTime = 30000;
 static unsigned long lastSent = 0;
 static sendStepEnum sendStep = Zone0Closed;
 
@@ -352,6 +352,8 @@ void setup()
     ESP32Can.begin(); // Initialize CAN interface
 
     Serial.println("CAN Initialized");
+
+    lastSent = millis();
 }
 
 void loop()
