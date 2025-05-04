@@ -65,7 +65,7 @@ interface AcState {
     onOff: boolean;
     mode: AcModeEnum;
     fanSpeed: FanSpeedEnum;
-    currentTemp: number;
+    currentTemp?: number;
     setTemp: number;
     zone0: boolean;
     zone1: boolean;
@@ -90,11 +90,12 @@ interface AcControlProps {
 
 export default function AcControl(props: AcControlProps) {
     const [acState, setAcState] = useState<AcState>(acInitialState);
-
+    
     useEffect(() => {
-        fetchAcState().then(d => setAcState(d))
+        fetchAcState().then((x) => {
+            setAcState(x);
+        })
     }, []);
-
 
     async function fetchAcState(): Promise<AcState> {
         try {
@@ -114,8 +115,34 @@ export default function AcControl(props: AcControlProps) {
         }
     }
 
+    async function sendPostRequest(url: string, data: string): Promise<void> {
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: data
+          });
+      
+          if (!response.ok) {
+            throw new Error(`Server responded with status ${response.status}`);
+          }
+        } catch (error) {
+          console.error('Error sending POST request:', error);
+        }
+      }
+
+    async function sendPost(newAcState: AcState) {
+        setAcState(newAcState);
+
+        const toSend = {...newAcState, currentTemp: undefined};
+        const url = new URL("/api", props.baseApiUrl).href;
+        sendPostRequest(url, JSON.stringify(toSend));
+    }
+
     const togglePower = () => {
-        setAcState({ ...acState, onOff: !acState.onOff })
+        sendPost({ ...acState, onOff: !acState.onOff });
     }
 
     const temperatureUpDown = (e: any) => {
@@ -133,16 +160,16 @@ export default function AcControl(props: AcControlProps) {
             }
         }
 
-        setAcState({ ...acState, setTemp: currentSetTemp });
+        sendPost({ ...acState, setTemp: currentSetTemp });
     }
 
     const handleChangeMode = (e: SelectChangeEvent) => {
-        setAcState({ ...acState, mode: Number.parseInt(e.target.value) });
+        sendPost({ ...acState, mode: Number.parseInt(e.target.value) });
     }
 
     const handleChangeFanSpeed = (e: SelectChangeEvent) => {
         const newValue: number = Number.parseInt(e.target.value);
-        setAcState({ ...acState, fanSpeed: newValue });
+        sendPost({ ...acState, fanSpeed: newValue });
     }
 
     const handleZoneChanged = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -151,27 +178,27 @@ export default function AcControl(props: AcControlProps) {
 
         switch (zoneId) {
             case "zone0":
-                setAcState({ ...acState, zone0: isOpen });
+                sendPost({ ...acState, zone0: isOpen });
                 break;
 
             case "zone1":
-                setAcState({ ...acState, zone1: isOpen });
+                sendPost({ ...acState, zone1: isOpen });
                 break;
 
             case "zone2":
-                setAcState({ ...acState, zone2: isOpen });
+                sendPost({ ...acState, zone2: isOpen });
                 break;
 
             case "zone3":
-                setAcState({ ...acState, zone3: isOpen });
+                sendPost({ ...acState, zone3: isOpen });
                 break;
 
             case "zone4":
-                setAcState({ ...acState, zone4: isOpen });
+                sendPost({ ...acState, zone4: isOpen });
                 break;
 
             case "zone5":
-                setAcState({ ...acState, zone5: isOpen });
+                sendPost({ ...acState, zone5: isOpen });
                 break;
 
             default:
@@ -200,7 +227,7 @@ export default function AcControl(props: AcControlProps) {
                     <Typography variant='h6' mt={"4px"}>Current Temp:</Typography>
                 </Grid>
                 <Grid size={7} mb={1} justifyItems={'left'}>
-                    <Typography ml={1} variant='h4'>{acState.currentTemp.toFixed(1)}</Typography>
+                    <Typography ml={1} variant='h4'>{acState.currentTemp?.toFixed(1)}</Typography>
                 </Grid>
 
                 <Grid size={4} justifyItems={'right'}>

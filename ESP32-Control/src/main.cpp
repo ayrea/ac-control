@@ -459,6 +459,14 @@ void setup()
         request->send(response);
     });
 
+    server.on("/api", HTTP_OPTIONS, [](AsyncWebServerRequest *request) {
+        AsyncWebServerResponse *response = request->beginResponse(204); // No Content
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        response->addHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+        response->addHeader("Access-Control-Allow-Headers", "Content-Type");
+        request->send(response);
+    });
+
     server.on("/api", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
     {
         Serial.println("POST");
@@ -481,7 +489,7 @@ void setup()
         bool rxZone4 = doc["zone4"];
         bool rxZone5 = doc["zone5"];
 
-        AsyncWebServerResponse *response = request->beginResponse(200, "application/json");
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", "{\"Status\":\"OK\"}");
         response->addHeader("Access-Control-Allow-Origin", "*");
         request->send(response);
 
