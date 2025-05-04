@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
 import { Button, Grid, MenuItem, Select, SelectChangeEvent, SvgIcon, Switch, Typography } from '@mui/material';
-import { ReactElement, useState } from 'react';
+import { ReactElement, useEffect, useState } from 'react';
 import PowerSettingsNewIcon from '@mui/icons-material/PowerSettingsNew';
 import ArrowDropUpIcon from '@mui/icons-material/ArrowDropUp';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
@@ -11,6 +11,7 @@ import SunnyIcon from '@mui/icons-material/Sunny';
 import CloudQueueIcon from '@mui/icons-material/CloudQueue';
 import BeachAccessIcon from '@mui/icons-material/BeachAccess';
 import AutoModeIcon from '@mui/icons-material/AutoMode';
+import acInitialState from '../data/initialState.json';
 
 interface AcModeItem {
     index: number;
@@ -66,59 +67,47 @@ interface AcState {
     fanSpeed: FanSpeedEnum,
     currentTemp: number,
     setTemp: number
-    zones: AcZone[]
+    zones: boolean[]
 }
 
-interface AcZone {
-    index: number,
-    label: string,
-    isOpen: boolean
+const zoneLabels: string[] = [
+    "Zone 0",
+    "Zone 1",
+    "Zone 2",
+    "Zone 3",
+    "Zone 4",
+    "Zone 5"
+]
+
+interface AcControlProps {
+    baseApiUrl: string
 }
 
-const acInitialState = (): AcState => {
-    return {
-        onOff: false,
-        mode: AcModeEnum.Cool,
-        fanSpeed: FanSpeedEnum.Low,
-        currentTemp: 24.3,
-        setTemp: 25,
-        zones: [
-            {
-                index: 0,
-                label: "Zone 1",
-                isOpen: true
-            },
-            {
-                index: 1,
-                label: "Zone 2",
-                isOpen: true
-            },
-            {
-                index: 2,
-                label: "Zone 3",
-                isOpen: true
-            },
-            {
-                index: 3,
-                label: "zone 4",
-                isOpen: true
-            },
-            {
-                index: 4,
-                label: "Zone 5",
-                isOpen: true
-            },
-            {
-                index: 5,
-                label: "Zone 6",
-                isOpen: true
-            },
-        ]
+export default function AcControl(props: AcControlProps) {
+    const [acState, setAcState] = useState<AcState>(acInitialState);
+
+    useEffect(() => {
+        fetchAcState().then(d => setAcState(d))
+    }, []);
+
+
+    async function fetchAcState(): Promise<AcState> {
+        try {
+            const url = new URL("/api", props.baseApiUrl).href;
+            const response = await fetch(url);
+            if (!response.ok) {
+                console.error("Error fetching AcState", response.status, response.statusText);
+                throw new Error("Error fetching AcState");
+            }
+
+            const data: AcState = await response.json();
+            return data;
+        }
+        catch (error) {
+            console.error("Error fetching AcState", error);
+            throw error;
+        }
     }
-}
-
-export default function AcControl() {
-    const [acState, setAcState] = useState<AcState>(acInitialState());
 
     const togglePower = () => {
         setAcState({ ...acState, onOff: !acState.onOff })
@@ -156,7 +145,7 @@ export default function AcControl() {
         const isOpen: boolean = e.target.checked;
 
         const newZones = [...acState.zones];
-        newZones[index].isOpen = isOpen;
+        newZones[index] = isOpen;
         setAcState({ ...acState, zones: newZones });
     }
 
@@ -238,14 +227,14 @@ export default function AcControl() {
                 </Grid>
 
                 <Grid size={6} justifyItems={"right"} display={"flex"} flexDirection={"column"}>
-                    {acState.zones.filter((zone, index) => index < 3 ? zone : null)
-                        .map((zone, i) => {
-                            return (<Grid size={12} key={"a" + i} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
-                                <Grid key={"a" + zone.index} size={4} sx={{ mb: 2 }} justifyItems={"right"}>
-                                    <Switch id={i.toString()} key={zone.index} checked={zone.isOpen} onChange={handleZoneChanged}></Switch>
+                    {acState.zones.slice(0, 3)
+                        .map((zoneOpen, index) => {
+                            return (<Grid size={12} key={"a" + index} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
+                                <Grid key={"a" + index} size={4} sx={{ mb: 2 }} justifyItems={"right"}>
+                                    <Switch id={index.toString()} key={"zone" + index} checked={zoneOpen} onChange={handleZoneChanged}></Switch>
                                 </Grid>
-                                <Grid key={"b" + zone.index} size={8} justifyItems={"right"} >
-                                    <Typography key={zone.index} variant='h6'>{zone.label}</Typography>
+                                <Grid key={"b" + index} size={8} justifyItems={"right"} >
+                                    <Typography key={"c" + index} variant='h6'>{zoneLabels[index]}</Typography>
                                 </Grid>
                             </Grid>
                             );
@@ -254,19 +243,19 @@ export default function AcControl() {
                 </Grid>
 
                 <Grid size={6} justifyItems={"right"} display={"flex"} flexDirection={"column"}>
-                    {
-                        acState.zones.filter((zone, index) => index >= 3 ? zone : null)
-                            .map((zone) => {
-                                return (<Grid size={12} key={zone.index} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
-                                    <Grid key={"zone-switch" + zone.index} size={5} sx={{ mb: 2 }} justifyItems={"right"}>
-                                        <Switch id={zone.index.toString()} key={zone.index} checked={zone.isOpen} onChange={handleZoneChanged}></Switch>
-                                    </Grid>
-                                    <Grid size={7} key={zone.index} justifyItems={"right"} >
-                                        <Typography key={zone.index} variant='h6'>{zone.label}</Typography>
-                                    </Grid>
+                    {acState.zones.slice(3, 6)
+                        .map((zoneOpen, i) => {
+                            const index = i + 3;
+                            return (<Grid size={12} key={"a" + index} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
+                                <Grid key={"a" + index} size={5} sx={{ mb: 2 }} justifyItems={"right"}>
+                                    <Switch id={index.toString()} key={"zone" + index} checked={zoneOpen} onChange={handleZoneChanged}></Switch>
                                 </Grid>
-                                );
-                            })
+                                <Grid key={"b" + index} size={7} justifyItems={"right"} >
+                                    <Typography key={"c" + index} variant='h6'>{zoneLabels[index]}</Typography>
+                                </Grid>
+                            </Grid>
+                            );
+                        })
                     }
                 </Grid>
 

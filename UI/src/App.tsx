@@ -17,7 +17,7 @@ function App() {
 
   return (
     baseApiUrl
-      ? (<ThemeProvider theme={theme}>< AcControl /></ThemeProvider >)
+      ? (<ThemeProvider theme={theme}><AcControl baseApiUrl={baseApiUrl} /></ThemeProvider >)
       : <ApiUrlPrompt setBaseUrl={setBaseApiUrl} />
   )
 }

@@ -1,0 +1,15 @@
+{
+    "onOff": false,
+    "mode": 1,
+    "fanSpeed": 1,
+    "currentTemp": 24.3,
+    "setTemp": 25,
+    "zones": [
+        true,
+        true,
+        true,
+        true,
+        true,
+        true
+    ]
+}
