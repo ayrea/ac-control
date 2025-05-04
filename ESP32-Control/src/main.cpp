@@ -453,7 +453,10 @@ void setup()
         doc["zone5"] = acZone5;
         String json;
         serializeJson(doc, json);
-        request->send(200, "application/json", json);
+
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
     });
 
     server.on("/api", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
@@ -478,7 +481,9 @@ void setup()
         bool rxZone4 = doc["zone4"];
         bool rxZone5 = doc["zone5"];
 
-        request->send(200, "application/json");
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json");
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
 
         if (rxPower != acPower)
         {

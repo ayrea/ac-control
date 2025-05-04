@@ -62,12 +62,17 @@ enum FanSpeedEnum {
 }
 
 interface AcState {
-    onOff: boolean,
-    mode: AcModeEnum,
-    fanSpeed: FanSpeedEnum,
-    currentTemp: number,
-    setTemp: number
-    zones: boolean[]
+    onOff: boolean;
+    mode: AcModeEnum;
+    fanSpeed: FanSpeedEnum;
+    currentTemp: number;
+    setTemp: number;
+    zone0: boolean;
+    zone1: boolean;
+    zone2: boolean;
+    zone3: boolean;
+    zone4: boolean;
+    zone5: boolean;
 }
 
 const zoneLabels: string[] = [
@@ -141,12 +146,37 @@ export default function AcControl(props: AcControlProps) {
     }
 
     const handleZoneChanged = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const index: number = Number.parseInt(e.target.id);
+        const zoneId: string = e.target.id;
         const isOpen: boolean = e.target.checked;
 
-        const newZones = [...acState.zones];
-        newZones[index] = isOpen;
-        setAcState({ ...acState, zones: newZones });
+        switch (zoneId) {
+            case "zone0":
+                setAcState({ ...acState, zone0: isOpen });
+                break;
+
+            case "zone1":
+                setAcState({ ...acState, zone1: isOpen });
+                break;
+
+            case "zone2":
+                setAcState({ ...acState, zone2: isOpen });
+                break;
+
+            case "zone3":
+                setAcState({ ...acState, zone3: isOpen });
+                break;
+
+            case "zone4":
+                setAcState({ ...acState, zone4: isOpen });
+                break;
+
+            case "zone5":
+                setAcState({ ...acState, zone5: isOpen });
+                break;
+
+            default:
+                console.error('Invalid zone zoneId:', zoneId);
+        }
     }
 
     const fanSpeedValues = getEnumValues(FanSpeedEnum);
@@ -227,38 +257,62 @@ export default function AcControl(props: AcControlProps) {
                 </Grid>
 
                 <Grid size={6} justifyItems={"right"} display={"flex"} flexDirection={"column"}>
-                    {acState.zones.slice(0, 3)
-                        .map((zoneOpen, index) => {
-                            return (<Grid size={12} key={"a" + index} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
-                                <Grid key={"a" + index} size={4} sx={{ mb: 2 }} justifyItems={"right"}>
-                                    <Switch id={index.toString()} key={"zone" + index} checked={zoneOpen} onChange={handleZoneChanged}></Switch>
-                                </Grid>
-                                <Grid key={"b" + index} size={8} justifyItems={"right"} >
-                                    <Typography key={"c" + index} variant='h6'>{zoneLabels[index]}</Typography>
-                                </Grid>
-                            </Grid>
-                            );
-                        })
-                    }
+                    <Grid size={12} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
+                        <Grid size={4} sx={{ mb: 2 }} justifyItems={"right"}>
+                            <Switch id="zone0" checked={acState.zone0} onChange={handleZoneChanged}></Switch>
+                        </Grid>
+                        <Grid size={8} justifyItems={"right"} >
+                            <Typography variant='h6'>{zoneLabels[0]}</Typography>
+                        </Grid>
+                    </Grid>
+
+                    <Grid size={12} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
+                        <Grid size={4} sx={{ mb: 2 }} justifyItems={"right"}>
+                            <Switch id="zone1" checked={acState.zone1} onChange={handleZoneChanged}></Switch>
+                        </Grid>
+                        <Grid size={8} justifyItems={"right"} >
+                            <Typography variant='h6'>{zoneLabels[1]}</Typography>
+                        </Grid>
+                    </Grid>
+
+                    <Grid size={12} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
+                        <Grid size={4} sx={{ mb: 2 }} justifyItems={"right"}>
+                            <Switch id="zone2" checked={acState.zone2} onChange={handleZoneChanged}></Switch>
+                        </Grid>
+                        <Grid size={8} justifyItems={"right"} >
+                            <Typography variant='h6'>{zoneLabels[2]}</Typography>
+                        </Grid>
+                    </Grid>
                 </Grid>
 
                 <Grid size={6} justifyItems={"right"} display={"flex"} flexDirection={"column"}>
-                    {acState.zones.slice(3, 6)
-                        .map((zoneOpen, i) => {
-                            const index = i + 3;
-                            return (<Grid size={12} key={"a" + index} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
-                                <Grid key={"a" + index} size={5} sx={{ mb: 2 }} justifyItems={"right"}>
-                                    <Switch id={index.toString()} key={"zone" + index} checked={zoneOpen} onChange={handleZoneChanged}></Switch>
-                                </Grid>
-                                <Grid key={"b" + index} size={7} justifyItems={"right"} >
-                                    <Typography key={"c" + index} variant='h6'>{zoneLabels[index]}</Typography>
-                                </Grid>
-                            </Grid>
-                            );
-                        })
-                    }
-                </Grid>
+                    <Grid size={12} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
+                        <Grid size={5} sx={{ mb: 2 }} justifyItems={"right"}>
+                            <Switch id="zone3" checked={acState.zone3} onChange={handleZoneChanged}></Switch>
+                        </Grid>
+                        <Grid size={7} justifyItems={"right"} >
+                            <Typography variant='h6'>{zoneLabels[3]}</Typography>
+                        </Grid>
+                    </Grid>
 
+                    <Grid size={12} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
+                        <Grid size={5} sx={{ mb: 2 }} justifyItems={"right"}>
+                            <Switch id="zone4" checked={acState.zone4} onChange={handleZoneChanged}></Switch>
+                        </Grid>
+                        <Grid size={7} justifyItems={"right"} >
+                            <Typography variant='h6'>{zoneLabels[4]}</Typography>
+                        </Grid>
+                    </Grid>
+
+                    <Grid size={12} justifyItems={"right"} display={"flex"} flexDirection={"row-reverse"}>
+                        <Grid size={5} sx={{ mb: 2 }} justifyItems={"right"}>
+                            <Switch id="zone5" checked={acState.zone5} onChange={handleZoneChanged}></Switch>
+                        </Grid>
+                        <Grid size={7} justifyItems={"right"} >
+                            <Typography variant='h6'>{zoneLabels[5]}</Typography>
+                        </Grid>
+                    </Grid>
+                </Grid>
             </Grid>
         </Paper>
     );
