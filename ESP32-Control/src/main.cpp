@@ -27,6 +27,7 @@ const char *password = "password";
 #define FRAME_POWER 0x140C0013
 
 AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
 
 static float acCurrentTemp = 24.0;
 static bool acZone0 = true;
@@ -41,6 +42,18 @@ static uint8_t acMode = 1;
 static bool acPower = false;
 
 static CanFrame outgoingFrame;
+
+void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len)
+{
+    if (type == WS_EVT_CONNECT)
+    {
+        Serial.println("WebSocket client connected");
+    }
+    else if (type == WS_EVT_DISCONNECT)
+    {
+        Serial.println("WebSocket client disconnected");
+    }
+}
 
 void displayFrame(CanFrame &frame, bool sending)
 {
@@ -554,6 +567,9 @@ void setup()
         }
     });
 
+    ws.onEvent(onWsEvent);
+    server.addHandler(&ws);
+
     server.begin();
 
     Serial.println("Initializing CAN...");
@@ -577,5 +593,21 @@ void loop()
     if (ESP32Can.readFrame(incoming))
     {
         processReceivedFrame(incoming);
+
+        JsonDocument doc;
+        doc["onOff"] = acPower;
+        doc["mode"] = acMode;
+        doc["fanSpeed"] = acFanSpeed;
+        doc["currentTemp"] = acCurrentTemp;
+        doc["setTemp"] = acSetTemp;
+        doc["zone0"] = acZone0;
+        doc["zone1"] = acZone1;
+        doc["zone2"] = acZone2;
+        doc["zone3"] = acZone3;
+        doc["zone4"] = acZone4;
+        doc["zone5"] = acZone5;
+        String json;
+        serializeJson(doc, json);
+        ws.textAll(json);
     }
 }

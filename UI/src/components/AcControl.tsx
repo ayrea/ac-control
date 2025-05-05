@@ -92,6 +92,17 @@ export default function AcControl(props: AcControlProps) {
     const [acState, setAcState] = useState<AcState>(acInitialState);
     
     useEffect(() => {
+        const wsAddress = props.baseApiUrl.replace("http://", "ws://") + "/ws";
+        const ws = new WebSocket(wsAddress);
+
+        ws.onmessage = (event) => {
+            const data: AcState = JSON.parse(event.data);
+            setAcState(data);
+        }
+
+        ws.onopen = () => console.log("WebSocket connected");
+        ws.onclose = () => console.log("WebSocket disconnected");
+
         fetchAcState().then((x) => {
             setAcState(x);
         })
