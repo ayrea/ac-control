@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include "SPIFFS.h"
 
 // Define CAN interface pins (use your specific ESP32 pins)
 #define CAN_TX 5
@@ -448,6 +449,13 @@ void setup()
     Serial.println();
     Serial.println("Connected to WiFi");
     Serial.println(WiFi.localIP());
+
+    if (!SPIFFS.begin(true)) {
+        Serial.println("An Error has occurred while mounting SPIFFS");
+        return;
+    }
+
+    server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
 
     server.on("/api", HTTP_GET, [](AsyncWebServerRequest *request)
     {
