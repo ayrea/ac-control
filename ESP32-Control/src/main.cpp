@@ -13,7 +13,7 @@ const char *ssid = "ssid";
 const char *password = "password";
 
 #define FRAME_DATETIME 0x4040001
-#define FRAME_CURRENT_TEMP 0x4040001
+#define FRAME_CURRENT_TEMP 0x414000B
 
 #define FRAME_ZONE0 0x140C0003
 #define FRAME_ZONE1 0x140C2003
