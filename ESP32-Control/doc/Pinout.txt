@@ -1,0 +1,12 @@
+AC CANBus RJ45 Pinout
+
+125kb/sec
+
+1 CAN H
+2 CAN L
+3 +5V
+4 GND
+5 +5V
+6 GND
+7 
+8 
