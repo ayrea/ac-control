@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "deploy-ui": "node -e \"const fs=require('fs'),p=require('path'),src=p.resolve(__dirname,'dist'),dst=p.resolve(__dirname,'..','ESP32-Control','data');fs.rmSync(dst,{recursive:true,force:true});fs.cpSync(src,dst,{recursive:true});console.log('Copied dist -> ESP32-Control/data');\"",
     "lint": "eslint .",
     "preview": "vite preview"
   },
