@@ -17,7 +17,7 @@ export function TemperatureDisplay({
         className="text-5xl font-semibold tabular-nums tracking-tight sm:text-6xl"
         aria-live="polite"
       >
-        {currentTemperature}
+        {currentTemperature.toFixed(1)}
         <span className="text-3xl font-normal text-muted-foreground sm:text-4xl">
           °C
         </span>

@@ -4,13 +4,17 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include "SPIFFS.h"
+#include "ESPAsyncDNSServer.h"
+#include <ESPAsync_WiFiManager.h>
+#include <Preferences.h>
+
+// NVS namespace/key for "enter WiFi config portal on next boot" (set by POST /config)
+static const char *const kPrefsNamespace = "app";
+static const char *const kPrefsConfigMode = "configMode";
 
 // Define CAN interface pins (use your specific ESP32 pins)
 #define CAN_TX 5
 #define CAN_RX 4
-
-const char *ssid = "ssid";
-const char *password = "password";
 
 #define FRAME_DATETIME 0x4040001
 #define FRAME_CURRENT_TEMP 0x414000B
@@ -28,7 +32,10 @@ const char *password = "password";
 #define FRAME_POWER 0x140C0013
 
 AsyncWebServer server(80);
+AsyncDNSServer dnsServer;
 AsyncWebSocket ws("/ws");
+
+Preferences preferences;
 
 static float acCurrentTemp = 24.0;
 static bool acZone0 = true;
@@ -438,19 +445,82 @@ void setup()
     Serial.begin(115200);
     delay(1000);
 
-    // Connect to Wi-Fi
-    WiFi.begin(ssid, password);
-    Serial.print("Connecting to WiFi...");
-    while (WiFi.status() != WL_CONNECTED)
+    // --- Phase 1: WiFi only (no SPIFFS, web server, or CAN until connected) ---
+    WiFi.mode(WIFI_STA);
+
+    preferences.begin(kPrefsNamespace, true);
+    bool configMode = preferences.getBool(kPrefsConfigMode, false);
+    preferences.end();
+
+    ESPAsync_WiFiManager wifiManager(&server, &dnsServer, "AC-Control");
+
+    String storedSsid = wifiManager.WiFi_SSID();
+    String storedPass = wifiManager.WiFi_Pass();
+
+    if (configMode)
     {
-        delay(500);
-        Serial.print(".");
+        Serial.println("Config mode requested (NVS). Skipping stored WiFi connect; will start portal.");
     }
-    Serial.println();
+
+    if (!configMode && storedSsid.length() > 0)
+    {
+        Serial.print("Connecting to stored WiFi: ");
+        Serial.println(storedSsid);
+
+        WiFi.begin(storedSsid.c_str(), storedPass.c_str());
+
+        const unsigned long connectTimeoutMs = 15000;
+        unsigned long start = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - start < connectTimeoutMs)
+        {
+            delay(500);
+            Serial.print(".");
+        }
+        Serial.println();
+    }
+
+    if (configMode || WiFi.status() != WL_CONNECTED)
+    {
+        if (configMode)
+        {
+            Serial.println("Starting config portal (AC-Control-AP) after /config request...");
+        }
+        else
+        {
+            Serial.println("WiFi not available. Starting config portal (AC-Control-AP)...");
+        }
+
+        wifiManager.setSaveConfigCallback([]()
+                                            {
+                                                Serial.println("WiFi credentials saved. Clearing config flag and restarting...");
+                                                preferences.begin(kPrefsNamespace, false);
+                                                preferences.remove(kPrefsConfigMode);
+                                                preferences.end();
+                                                delay(100);
+                                                ESP.restart();
+                                            });
+
+        if (!wifiManager.startConfigPortal("AC-Control-AP"))
+        {
+            Serial.println("Config portal exited without connection. Restarting to retry...");
+            delay(500);
+            ESP.restart();
+        }
+    }
+
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("WiFi not connected. Restarting...");
+        delay(500);
+        ESP.restart();
+    }
+
     Serial.println("Connected to WiFi");
     Serial.println(WiFi.localIP());
 
-    if (!SPIFFS.begin(true)) {
+    // --- Phase 2: normal application (SPIFFS, web UI, CAN) ---
+    if (!SPIFFS.begin(true))
+    {
         Serial.println("An Error has occurred while mounting SPIFFS");
         return;
     }
@@ -458,7 +528,7 @@ void setup()
     server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
 
     server.on("/api", HTTP_GET, [](AsyncWebServerRequest *request)
-    {
+              {
         Serial.println("GET");
         JsonDocument doc;
         doc["onOff"] = acPower;
@@ -477,19 +547,18 @@ void setup()
 
         AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
         response->addHeader("Access-Control-Allow-Origin", "*");
-        request->send(response);
-    });
+        request->send(response); });
 
-    server.on("/api", HTTP_OPTIONS, [](AsyncWebServerRequest *request) {
+    server.on("/api", HTTP_OPTIONS, [](AsyncWebServerRequest *request)
+              {
         AsyncWebServerResponse *response = request->beginResponse(204); // No Content
         response->addHeader("Access-Control-Allow-Origin", "*");
         response->addHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
         response->addHeader("Access-Control-Allow-Headers", "Content-Type");
-        request->send(response);
-    });
+        request->send(response); });
 
     server.on("/api", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
-    {
+              {
         Serial.println("POST");
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, data);
@@ -572,8 +641,27 @@ void setup()
         {
             acZone5 = rxZone5;
             setZone(5);
-        }
-    });
+        } });
+
+    server.on("/config", HTTP_OPTIONS, [](AsyncWebServerRequest *request)
+              {
+        AsyncWebServerResponse *response = request->beginResponse(204); // No Content
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        response->addHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+        response->addHeader("Access-Control-Allow-Headers", "Content-Type");
+        request->send(response); });
+
+    server.on("/config", HTTP_POST, [](AsyncWebServerRequest *request)
+              {
+        preferences.begin(kPrefsNamespace, false);
+        preferences.putBool(kPrefsConfigMode, true);
+        preferences.end();
+        Serial.println("POST /config: configMode set; restarting...");
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", "{\"status\":\"OK\"}");
+        response->addHeader("Access-Control-Allow-Origin", "*");
+        request->send(response);
+        delay(500);
+        ESP.restart(); });
 
     ws.onEvent(onWsEvent);
     server.addHandler(&ws);

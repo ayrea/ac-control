@@ -47,8 +47,7 @@ const FAN_SPEED_FROM_API: Record<AcApiFanSpeed, FanSpeed> = {
 
 const ZONE_COUNT = 6
 
-// Placeholder for now; this can be replaced by an env var later.
-export const API_BASE_URL = 'http://localhost:5000'
+export const API_BASE_URL = window.location.origin
 
 const API_URL = new URL('/api', API_BASE_URL).href
 
