@@ -2,11 +2,11 @@ AC CANBus RJ45 Pinout
 
 125kb/sec
 
-1 CAN H
-2 CAN L
-3 +5V
-4 GND
-5 +5V
-6 GND
+1 CAN H	- GreenStripe	- Pin2 (CAN Modal)
+2 CAN L	- Green		- Pin1 (CAN Modal)
+3 +5V	- OrangeStripe	- ESP32 Bottom Left (SW)
+4 GND	- Blue		- ESP32 6 up bottom left
+5 +5V	- BlueStripe	- ESP32 Bottom Left (SW)
+6 GND	- Orange	- ESP32 6 up bottom left
 7 
 8 
