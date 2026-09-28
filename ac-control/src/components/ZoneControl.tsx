@@ -12,6 +12,11 @@ export function ZoneControl({ zones, onToggleZone }: ZoneControlProps) {
       <p className="text-muted-foreground px-1 text-xs font-medium tracking-wide uppercase">
         Zones
       </p>
+      {zones.length === 0 && (
+        <p className="text-muted-foreground px-1 text-sm">
+          Waiting for zone information...
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-3">
         {zones.map((zone) => (
           <div

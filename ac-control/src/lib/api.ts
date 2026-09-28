@@ -3,18 +3,19 @@ import type { ACMode, ACState, FanSpeed, Zone } from '@/types/ac'
 type AcApiMode = 1 | 2 | 3 | 4 | 5
 type AcApiFanSpeed = 1 | 2 | 3
 
+export interface AcApiZone {
+  id: number
+  name: string
+  enabled: boolean
+}
+
 export interface AcApiState {
   onOff: boolean
   mode: AcApiMode
   fanSpeed: AcApiFanSpeed
   currentTemp?: number
   setTemp: number
-  zone0: boolean
-  zone1: boolean
-  zone2: boolean
-  zone3: boolean
-  zone4: boolean
-  zone5: boolean
+  zones: AcApiZone[]
 }
 
 const MODE_TO_API: Record<ACMode, AcApiMode> = {
@@ -45,30 +46,16 @@ const FAN_SPEED_FROM_API: Record<AcApiFanSpeed, FanSpeed> = {
   3: 'high',
 }
 
-const ZONE_COUNT = 6
-
 export const API_BASE_URL = window.location.origin
 
 const API_URL = new URL('/api', API_BASE_URL).href
 
-function createDefaultZones(): Zone[] {
-  return Array.from({ length: ZONE_COUNT }, (_, i) => ({
-    id: i + 1,
-    name: `Zone ${i + 1}`,
-    enabled: true,
-  }))
-}
-
 export function fromApiState(apiState: AcApiState): ACState {
-  const zones = createDefaultZones()
-  const zoneValues = [
-    apiState.zone0,
-    apiState.zone1,
-    apiState.zone2,
-    apiState.zone3,
-    apiState.zone4,
-    apiState.zone5,
-  ]
+  const zones: Zone[] = (apiState.zones ?? []).map((zone) => ({
+    id: zone.id,
+    name: zone.name,
+    enabled: zone.enabled,
+  }))
 
   return {
     power: apiState.onOff,
@@ -76,27 +63,22 @@ export function fromApiState(apiState: AcApiState): ACState {
     desiredTemperature: apiState.setTemp,
     mode: MODE_FROM_API[apiState.mode],
     fanSpeed: FAN_SPEED_FROM_API[apiState.fanSpeed],
-    zones: zones.map((zone, i) => ({ ...zone, enabled: zoneValues[i] })),
+    zones,
   }
 }
 
 export function toApiState(state: ACState): AcApiState {
-  const zoneValues = Array.from({ length: ZONE_COUNT }, (_, i) => {
-    return state.zones.find((zone) => zone.id === i + 1)?.enabled ?? false
-  })
-
   return {
     onOff: state.power,
     mode: MODE_TO_API[state.mode],
     fanSpeed: FAN_SPEED_TO_API[state.fanSpeed],
     currentTemp: state.currentTemperature,
     setTemp: state.desiredTemperature,
-    zone0: zoneValues[0],
-    zone1: zoneValues[1],
-    zone2: zoneValues[2],
-    zone3: zoneValues[3],
-    zone4: zoneValues[4],
-    zone5: zoneValues[5],
+    zones: state.zones.map((zone) => ({
+      id: zone.id,
+      name: zone.name,
+      enabled: zone.enabled,
+    })),
   }
 }
 

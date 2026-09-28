@@ -19,12 +19,16 @@ static const char *const kPrefsConfigMode = "configMode";
 #define FRAME_DATETIME 0x4040001
 #define FRAME_CURRENT_TEMP 0x414000B
 
-#define FRAME_ZONE0 0x140C0003
-#define FRAME_ZONE1 0x140C2003
-#define FRAME_ZONE2 0x140C4003
-#define FRAME_ZONE3 0x140C6003
-#define FRAME_ZONE4 0x140C8003
-#define FRAME_ZONE5 0x140CA003
+// Zone frames are laid out on a fixed stride: zone N (1-based) is base + (N - 1) * stride.
+// The name arrives as a pair of consecutive identifiers holding 8 ASCII bytes each.
+#define MAX_ZONES 14
+#define ZONE_FRAME_STRIDE 0x2000
+#define FRAME_ZONE_BASE 0x140C0003      // on/off, zone 1
+#define FRAME_ZONE_NAME_BASE 0x04040032 // name part A, zone 1
+#define ZONE_NAME_MAX_LEN 16
+
+// Zones reported until the AC system next broadcasts its zone names
+#define DEFAULT_ZONE_COUNT 6
 
 #define FRAME_SET_TEMP 0x140C0017
 #define FRAME_FAN_SPEED 0x140C0015
@@ -37,19 +41,69 @@ AsyncWebSocket ws("/ws");
 
 Preferences preferences;
 
+struct ZoneInfo
+{
+    char name[ZONE_NAME_MAX_LEN + 1];
+    bool enabled;
+    bool present;   // part B was not FF x8
+    bool nameKnown; // both halves decoded
+};
+
 static float acCurrentTemp = 24.0;
-static bool acZone0 = true;
-static bool acZone1 = true;
-static bool acZone2 = true;
-static bool acZone3 = true;
-static bool acZone4 = true;
-static bool acZone5 = true;
+static ZoneInfo acZones[MAX_ZONES];
+static bool anyZoneNameKnown = false;
 static int acSetTemp = 24;
 static uint8_t acFanSpeed = 1;
 static uint8_t acMode = 1;
 static bool acPower = false;
 
+static bool stateDirty = false;
+
 static CanFrame outgoingFrame;
+
+// Returns the zone index for an on/off frame, or -1 when the identifier is not one
+int zoneIndexFromControlFrame(uint32_t identifier)
+{
+    if (identifier < FRAME_ZONE_BASE)
+    {
+        return -1;
+    }
+
+    uint32_t delta = identifier - FRAME_ZONE_BASE;
+    if (delta % ZONE_FRAME_STRIDE != 0)
+    {
+        return -1;
+    }
+
+    uint32_t index = delta / ZONE_FRAME_STRIDE;
+    return index < MAX_ZONES ? (int)index : -1;
+}
+
+// Returns the zone index for a name frame, or -1 when the identifier is not one.
+// isPartB reports whether this is the second half of the name.
+int zoneIndexFromNameFrame(uint32_t identifier, bool &isPartB)
+{
+    if (identifier < FRAME_ZONE_NAME_BASE)
+    {
+        return -1;
+    }
+
+    uint32_t delta = identifier - FRAME_ZONE_NAME_BASE;
+    uint32_t remainder = delta % ZONE_FRAME_STRIDE;
+    if (remainder > 1)
+    {
+        return -1;
+    }
+
+    uint32_t index = delta / ZONE_FRAME_STRIDE;
+    if (index >= MAX_ZONES)
+    {
+        return -1;
+    }
+
+    isPartB = remainder == 1;
+    return (int)index;
+}
 
 void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len)
 {
@@ -98,9 +152,104 @@ void displayFrame(CanFrame &frame, bool sending)
     Serial.println();
 }
 
+// Copies 8 name bytes into the buffer, substituting a space for anything unprintable
+// so a corrupt frame cannot break JSON serialization
+void copyNameBytes(char *dest, const uint8_t *source)
+{
+    for (int i = 0; i < 8; i++)
+    {
+        uint8_t value = source[i];
+        if (value == 0)
+        {
+            dest[i] = '\0';
+        }
+        else if (value < 0x20 || value > 0x7E)
+        {
+            dest[i] = ' ';
+        }
+        else
+        {
+            dest[i] = (char)value;
+        }
+    }
+}
+
+bool isUnusedZoneMarker(const CanFrame &frame)
+{
+    for (int i = 0; i < 8; i++)
+    {
+        if (frame.data[i] != 0xFF)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+void processZoneNameFrame(CanFrame &frame, int zoneIndex, bool isPartB)
+{
+    ZoneInfo &zone = acZones[zoneIndex];
+
+    if (!isPartB)
+    {
+        copyNameBytes(zone.name, frame.data);
+        return;
+    }
+
+    anyZoneNameKnown = true;
+    zone.nameKnown = true;
+    stateDirty = true;
+
+    if (isUnusedZoneMarker(frame))
+    {
+        zone.present = false;
+        zone.name[0] = '\0';
+        Serial.print("Zone ");
+        Serial.print(zoneIndex + 1);
+        Serial.println(" unused");
+        return;
+    }
+
+    copyNameBytes(zone.name + 8, frame.data);
+    zone.name[ZONE_NAME_MAX_LEN] = '\0';
+    zone.present = true;
+
+    Serial.print("Zone ");
+    Serial.print(zoneIndex + 1);
+    Serial.print(" name ");
+    Serial.println(zone.name);
+}
+
 void processReceivedFrame(CanFrame &frame)
 {
     bool printFrameData = false;
+
+    bool isNamePartB = false;
+    int nameZoneIndex = zoneIndexFromNameFrame(frame.identifier, isNamePartB);
+    if (nameZoneIndex >= 0)
+    {
+        processZoneNameFrame(frame, nameZoneIndex, isNamePartB);
+        displayFrame(frame, false);
+        return;
+    }
+
+    int controlZoneIndex = zoneIndexFromControlFrame(frame.identifier);
+    if (controlZoneIndex >= 0)
+    {
+        bool enabled = frame.data[0] == 1;
+        if (acZones[controlZoneIndex].enabled != enabled)
+        {
+            acZones[controlZoneIndex].enabled = enabled;
+            stateDirty = true;
+        }
+
+        Serial.print("Zone ");
+        Serial.print(controlZoneIndex + 1);
+        Serial.print(" ");
+        Serial.println(enabled);
+        displayFrame(frame, false);
+        return;
+    }
 
     if (frame.identifier == FRAME_DATETIME)
     {
@@ -124,63 +273,19 @@ void processReceivedFrame(CanFrame &frame)
     else if (frame.identifier == FRAME_CURRENT_TEMP)
     {
         uint16_t binTemp = (frame.data[5] << 8) + frame.data[4];
-        acCurrentTemp = (float)binTemp / 100.0;
+        float currentTemp = (float)binTemp / 100.0;
+        stateDirty = stateDirty || acCurrentTemp != currentTemp;
+        acCurrentTemp = currentTemp;
         Serial.print("Current Temperature ");
         Serial.print(acCurrentTemp, 1);
         printFrameData = true;
     }
 
-    else if (frame.identifier == FRAME_ZONE0)
-    {
-        acZone0 = frame.data[0] == 1;
-        Serial.print("Zone 0 ");
-        Serial.println(acZone0);
-        printFrameData = true;
-    }
-
-    else if (frame.identifier == FRAME_ZONE1)
-    {
-        acZone1 = frame.data[0] == 1;
-        Serial.print("Zone 1 ");
-        Serial.println(acZone1);
-        printFrameData = true;
-    }
-
-    else if (frame.identifier == FRAME_ZONE2)
-    {
-        acZone2 = frame.data[0] == 1;
-        Serial.print("Zone 2 ");
-        Serial.println(acZone2);
-        printFrameData = true;
-    }
-
-    else if (frame.identifier == FRAME_ZONE3)
-    {
-        acZone3 = frame.data[0] == 1;
-        Serial.print("Zone 3 ");
-        Serial.println(acZone3);
-        printFrameData = true;
-    }
-
-    else if (frame.identifier == FRAME_ZONE4)
-    {
-        acZone4 = frame.data[0] == 1;
-        Serial.print("Zone 4 ");
-        Serial.println(acZone4);
-        printFrameData = true;
-    }
-
-    else if (frame.identifier == FRAME_ZONE5)
-    {
-        acZone5 = frame.data[0] == 1;
-        Serial.print("Zone 5 ");
-        Serial.println(acZone5);
-        printFrameData = true;
-    }
-
     else if (frame.identifier == FRAME_SET_TEMP)
     {
-        acSetTemp = ((frame.data[1] << 8) + frame.data[0]) / 100;
+        int setTemp = ((frame.data[1] << 8) + frame.data[0]) / 100;
+        stateDirty = stateDirty || acSetTemp != setTemp;
+        acSetTemp = setTemp;
         Serial.print("Set Temperature ");
         Serial.println(acSetTemp);
         printFrameData = true;
@@ -188,6 +293,7 @@ void processReceivedFrame(CanFrame &frame)
 
     else if (frame.identifier == FRAME_FAN_SPEED)
     {
+        stateDirty = stateDirty || acFanSpeed != frame.data[0];
         acFanSpeed = frame.data[0];
         Serial.print("Fan Speed ");
         Serial.println(acFanSpeed);
@@ -196,6 +302,7 @@ void processReceivedFrame(CanFrame &frame)
 
     else if (frame.identifier == FRAME_MODE)
     {
+        stateDirty = stateDirty || acMode != frame.data[0];
         acMode = frame.data[0];
         Serial.print("Mode ");
         Serial.println(acMode);
@@ -204,7 +311,9 @@ void processReceivedFrame(CanFrame &frame)
 
     else if (frame.identifier == FRAME_POWER)
     {
-        acPower = frame.data[0] == 1;
+        bool power = frame.data[0] == 1;
+        stateDirty = stateDirty || acPower != power;
+        acPower = power;
         Serial.print("Power ");
         Serial.println(acPower);
         printFrameData = true;
@@ -234,44 +343,15 @@ void sendFrame()
     }
 }
 
-void setZone(uint8_t zone)
+void setZone(uint8_t zoneIndex)
 {
-    switch (zone)
+    if (zoneIndex >= MAX_ZONES)
     {
-    case 0:
-        outgoingFrame.identifier = FRAME_ZONE0;
-        outgoingFrame.data[0] = acZone0 ? 1 : 2;
-        break;
-
-    case 1:
-        outgoingFrame.identifier = FRAME_ZONE1;
-        outgoingFrame.data[0] = acZone1 ? 1 : 2;
-        break;
-
-    case 2:
-        outgoingFrame.identifier = FRAME_ZONE2;
-        outgoingFrame.data[0] = acZone2 ? 1 : 2;
-        break;
-
-    case 3:
-        outgoingFrame.identifier = FRAME_ZONE3;
-        outgoingFrame.data[0] = acZone3 ? 1 : 2;
-        break;
-
-    case 4:
-        outgoingFrame.identifier = FRAME_ZONE4;
-        outgoingFrame.data[0] = acZone4 ? 1 : 2;
-        break;
-
-    case 5:
-        outgoingFrame.identifier = FRAME_ZONE5;
-        outgoingFrame.data[0] = acZone5 ? 1 : 2;
-        break;
-
-    default:
-        outgoingFrame.identifier = 0; // Should never get here
         return;
     }
+
+    outgoingFrame.identifier = FRAME_ZONE_BASE + zoneIndex * ZONE_FRAME_STRIDE;
+    outgoingFrame.data[0] = acZones[zoneIndex].enabled ? 1 : 2;
 
     outgoingFrame.data[1] = 9;
     outgoingFrame.data[2] = 0;
@@ -282,8 +362,53 @@ void setZone(uint8_t zone)
     outgoingFrame.data[7] = 0;
 
     Serial.print("Setting Zone ");
+    Serial.println(zoneIndex + 1);
 
     sendFrame();
+}
+
+// Serializes the current state. Until the AC system broadcasts its zone names the
+// zone list falls back to DEFAULT_ZONE_COUNT placeholders.
+String buildStateJson()
+{
+    JsonDocument doc;
+    doc["onOff"] = acPower;
+    doc["mode"] = acMode;
+    doc["fanSpeed"] = acFanSpeed;
+    doc["currentTemp"] = acCurrentTemp;
+    doc["setTemp"] = acSetTemp;
+
+    JsonArray zones = doc["zones"].to<JsonArray>();
+
+    if (!anyZoneNameKnown)
+    {
+        for (int i = 0; i < DEFAULT_ZONE_COUNT; i++)
+        {
+            JsonObject zone = zones.add<JsonObject>();
+            zone["id"] = i + 1;
+            zone["name"] = String("Zone ") + String(i + 1);
+            zone["enabled"] = acZones[i].enabled;
+        }
+    }
+    else
+    {
+        for (int i = 0; i < MAX_ZONES; i++)
+        {
+            if (!acZones[i].present)
+            {
+                continue;
+            }
+
+            JsonObject zone = zones.add<JsonObject>();
+            zone["id"] = i + 1;
+            zone["name"] = acZones[i].name;
+            zone["enabled"] = acZones[i].enabled;
+        }
+    }
+
+    String json;
+    serializeJson(doc, json);
+    return json;
 }
 
 void setTemperature()
@@ -445,6 +570,14 @@ void setup()
     Serial.begin(115200);
     delay(1000);
 
+    for (int i = 0; i < MAX_ZONES; i++)
+    {
+        acZones[i].name[0] = '\0';
+        acZones[i].enabled = true;
+        acZones[i].present = false;
+        acZones[i].nameKnown = false;
+    }
+
     // --- Phase 1: WiFi only (no SPIFFS, web server, or CAN until connected) ---
     WiFi.mode(WIFI_STA);
 
@@ -530,20 +663,7 @@ void setup()
     server.on("/api", HTTP_GET, [](AsyncWebServerRequest *request)
               {
         Serial.println("GET");
-        JsonDocument doc;
-        doc["onOff"] = acPower;
-        doc["mode"] = acMode;
-        doc["fanSpeed"] = acFanSpeed;
-        doc["currentTemp"] = acCurrentTemp;
-        doc["setTemp"] = acSetTemp;
-        doc["zone0"] = acZone0;
-        doc["zone1"] = acZone1;
-        doc["zone2"] = acZone2;
-        doc["zone3"] = acZone3;
-        doc["zone4"] = acZone4;
-        doc["zone5"] = acZone5;
-        String json;
-        serializeJson(doc, json);
+        String json = buildStateJson();
 
         AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
         response->addHeader("Access-Control-Allow-Origin", "*");
@@ -572,12 +692,6 @@ void setup()
         uint8_t rxMode = doc["mode"];
         uint8_t rxFanSpeed = doc["fanSpeed"];
         int rxSetTemp = doc["setTemp"];
-        bool rxZone0 = doc["zone0"];
-        bool rxZone1 = doc["zone1"];
-        bool rxZone2 = doc["zone2"];
-        bool rxZone3 = doc["zone3"];
-        bool rxZone4 = doc["zone4"];
-        bool rxZone5 = doc["zone5"];
 
         AsyncWebServerResponse *response = request->beginResponse(200, "application/json", "{\"Status\":\"OK\"}");
         response->addHeader("Access-Control-Allow-Origin", "*");
@@ -607,40 +721,22 @@ void setup()
             setTemperature();
         }
 
-        if (rxZone0 != acZone0)
+        for (JsonObject rxZone : doc["zones"].as<JsonArray>())
         {
-            acZone0 = rxZone0;
-            setZone(0);
-        }
+            int id = rxZone["id"] | 0;
+            if (id < 1 || id > MAX_ZONES)
+            {
+                continue;
+            }
 
-        if (rxZone1 != acZone1)
-        {
-            acZone1 = rxZone1;
-            setZone(1);
-        }
+            uint8_t zoneIndex = (uint8_t)(id - 1);
+            bool enabled = rxZone["enabled"];
 
-        if (rxZone2 != acZone2)
-        {
-            acZone2 = rxZone2;
-            setZone(2);
-        }
-
-        if (rxZone3 != acZone3)
-        {
-            acZone3 = rxZone3;
-            setZone(3);
-        }
-
-        if (rxZone4 != acZone4)
-        {
-            acZone4 = rxZone4;
-            setZone(4);
-        }
-
-        if (rxZone5 != acZone5)
-        {
-            acZone5 = rxZone5;
-            setZone(5);
+            if (enabled != acZones[zoneIndex].enabled)
+            {
+                acZones[zoneIndex].enabled = enabled;
+                setZone(zoneIndex);
+            }
         } });
 
     server.on("/config", HTTP_OPTIONS, [](AsyncWebServerRequest *request)
@@ -690,20 +786,12 @@ void loop()
     {
         processReceivedFrame(incoming);
 
-        JsonDocument doc;
-        doc["onOff"] = acPower;
-        doc["mode"] = acMode;
-        doc["fanSpeed"] = acFanSpeed;
-        doc["currentTemp"] = acCurrentTemp;
-        doc["setTemp"] = acSetTemp;
-        doc["zone0"] = acZone0;
-        doc["zone1"] = acZone1;
-        doc["zone2"] = acZone2;
-        doc["zone3"] = acZone3;
-        doc["zone4"] = acZone4;
-        doc["zone5"] = acZone5;
-        String json;
-        serializeJson(doc, json);
-        ws.textAll(json);
+        // Only push when something actually changed, otherwise the burst of zone
+        // name frames at AC startup would flood the socket
+        if (stateDirty)
+        {
+            stateDirty = false;
+            ws.textAll(buildStateJson());
+        }
     }
 }

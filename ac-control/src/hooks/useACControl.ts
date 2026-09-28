@@ -5,16 +5,10 @@ import {
   fetchAcState,
   postAcState,
 } from '@/lib/api'
-import type { ACMode, ACState, FanSpeed, Zone } from '@/types/ac'
+import type { ACMode, ACState, FanSpeed } from '@/types/ac'
 
 const MIN_TEMP = 16
 const MAX_TEMP = 30
-
-const initialZones: Zone[] = Array.from({ length: 6 }, (_, i) => ({
-  id: i + 1,
-  name: `Zone ${i + 1}`,
-  enabled: true,
-}))
 
 export function useACControl() {
   const [acState, setAcState] = useState<ACState>({
@@ -23,7 +17,7 @@ export function useACControl() {
     desiredTemperature: 22,
     mode: 'cool',
     fanSpeed: 'medium',
-    zones: initialZones,
+    zones: [],
   })
 
   const syncAndPersist = useCallback((updater: (prev: ACState) => ACState) => {
