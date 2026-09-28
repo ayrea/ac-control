@@ -16,6 +16,11 @@ static const char *const kPrefsConfigMode = "configMode";
 #define CAN_TX 5
 #define CAN_RX 4
 
+// Momentary button to GND; held during startup to force the WiFi config portal.
+// Keep holding past the reset threshold to also clear stored credentials.
+#define CONFIG_BUTTON_PIN 13
+#define CONFIG_BUTTON_RESET_HOLD_MS 10000
+
 #define FRAME_DATETIME 0x4040001
 #define FRAME_CURRENT_TEMP 0x414000B
 
@@ -581,18 +586,49 @@ void setup()
     // --- Phase 1: WiFi only (no SPIFFS, web server, or CAN until connected) ---
     WiFi.mode(WIFI_STA);
 
+    pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
+    delay(50); // debounce and let the pull-up settle
+
+    bool buttonHeld = digitalRead(CONFIG_BUTTON_PIN) == LOW;
+    bool factoryReset = false;
+
+    if (buttonHeld)
+    {
+        Serial.println("Config button held - keep holding 10s to clear stored WiFi credentials");
+
+        unsigned long holdStart = millis();
+        while (digitalRead(CONFIG_BUTTON_PIN) == LOW)
+        {
+            if (millis() - holdStart >= CONFIG_BUTTON_RESET_HOLD_MS)
+            {
+                factoryReset = true;
+                break;
+            }
+            delay(50);
+        }
+    }
+
     preferences.begin(kPrefsNamespace, true);
-    bool configMode = preferences.getBool(kPrefsConfigMode, false);
+    bool configMode = preferences.getBool(kPrefsConfigMode, false) || buttonHeld;
     preferences.end();
 
     ESPAsync_WiFiManager wifiManager(&server, &dnsServer, "AC-Control");
+
+    // Must run before the stored credentials are read below
+    if (factoryReset)
+    {
+        Serial.println("Clearing stored WiFi credentials");
+        wifiManager.resetSettings();
+    }
 
     String storedSsid = wifiManager.WiFi_SSID();
     String storedPass = wifiManager.WiFi_Pass();
 
     if (configMode)
     {
-        Serial.println("Config mode requested (NVS). Skipping stored WiFi connect; will start portal.");
+        Serial.print("Config mode requested (");
+        Serial.print(buttonHeld ? "button" : "NVS");
+        Serial.println("). Skipping stored WiFi connect; will start portal.");
     }
 
     if (!configMode && storedSsid.length() > 0)
@@ -616,7 +652,7 @@ void setup()
     {
         if (configMode)
         {
-            Serial.println("Starting config portal (AC-Control-AP) after /config request...");
+            Serial.println("Starting config portal (AC-Control-AP) on request...");
         }
         else
         {
