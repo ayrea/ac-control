@@ -12,6 +12,10 @@
 static const char *const kPrefsNamespace = "app";
 static const char *const kPrefsConfigMode = "configMode";
 
+// SSID broadcast by the config portal SoftAP, and the hostname used once joined
+static const char *const kConfigPortalSsid = "AC-Control";
+static const char *const kHostname = "AC-Control";
+
 // Define CAN interface pins (use your specific ESP32 pins)
 #define CAN_TX 5
 #define CAN_RX 4
@@ -612,7 +616,7 @@ void setup()
     bool configMode = preferences.getBool(kPrefsConfigMode, false) || buttonHeld;
     preferences.end();
 
-    ESPAsync_WiFiManager wifiManager(&server, &dnsServer, "AC-Control");
+    ESPAsync_WiFiManager wifiManager(&server, &dnsServer, kHostname);
 
     // Must run before the stored credentials are read below
     if (factoryReset)
@@ -652,24 +656,24 @@ void setup()
     {
         if (configMode)
         {
-            Serial.println("Starting config portal (AC-Control-AP) on request...");
+            Serial.print("Starting config portal on request. SSID: ");
         }
         else
         {
-            Serial.println("WiFi not available. Starting config portal (AC-Control-AP)...");
+            Serial.print("WiFi not available. Starting config portal. SSID: ");
         }
+        Serial.println(kConfigPortalSsid);
 
         wifiManager.setSaveConfigCallback([]()
-                                            {
+                                          {
                                                 Serial.println("WiFi credentials saved. Clearing config flag and restarting...");
                                                 preferences.begin(kPrefsNamespace, false);
                                                 preferences.remove(kPrefsConfigMode);
                                                 preferences.end();
                                                 delay(100);
-                                                ESP.restart();
-                                            });
+                                                ESP.restart(); });
 
-        if (!wifiManager.startConfigPortal("AC-Control-AP"))
+        if (!wifiManager.startConfigPortal(kConfigPortalSsid))
         {
             Serial.println("Config portal exited without connection. Restarting to retry...");
             delay(500);
